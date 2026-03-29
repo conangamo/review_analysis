@@ -1,0 +1,140 @@
+category:
+  name: "Electronics"
+  amazon_category_id: "Electronics"
+  description: "Consumer electronics products including phones, laptops, headphones, cameras, and more"
+  
+data:
+  min_reviews: 20
+  top_products: 3000
+  sampling_strategy: "stratified_top"
+  rating_bins:
+    # [min_rating, max_rating, sample_count]
+    - [4.5, 5.0, 1000]
+    - [3.0, 4.5, 1000]
+    - [1.0, 3.0, 1000]
+  
+  # Text quality filters
+  min_text_length: 20  # words
+  exclude_no_text: true
+
+aspects:
+  # Tier 1: Core aspects - ALWAYS analyzed and displayed
+  tier_1_core:
+    - name: "battery"
+      keywords: ["battery", "battery life", "power", "charging", "charge", "recharge", "rechargeable"]
+      priority: 1
+      
+    - name: "performance"
+      keywords: ["performance", "speed", "fast", "slow", "lag", "laggy", "responsive", "quick", "snappy"]
+      priority: 2
+      
+    - name: "quality"
+      keywords: ["quality", "build quality", "durability", "sturdy", "well made", "poorly made", "solid", "cheap feel"]
+      priority: 3
+      
+    - name: "value"
+      keywords: ["price", "value", "worth", "expensive", "cheap", "cost", "money", "affordable", "overpriced"]
+      priority: 4
+  
+  # Tier 2: Common aspects - Analyzed if keywords detected, displayed if sufficient mentions (>10)
+  tier_2_common:
+    - name: "screen"
+      keywords: ["screen", "display", "monitor", "resolution", "brightness", "vivid", "dim", "clear"]
+      applicable_to: ["phones", "laptops", "tablets", "monitors", "tv"]
+      min_mentions: 10
+      
+    - name: "sound"
+      keywords: ["sound", "audio", "speaker", "volume", "music", "bass", "treble", "noise", "quality"]
+      applicable_to: ["headphones", "speakers", "phones", "earbuds"]
+      min_mentions: 10
+      
+    - name: "design"
+      keywords: ["design", "look", "appearance", "style", "aesthetic", "beautiful", "ugly", "sleek"]
+      min_mentions: 10
+      
+    - name: "durability"
+      keywords: ["durability", "durable", "last", "lasting", "broke", "broken", "fragile", "strong"]
+      min_mentions: 10
+  
+  # Tier 3: Optional aspects - Analyzed if keywords detected, displayed contextually
+  tier_3_optional:
+    - name: "ease_of_use"
+      keywords: ["easy to use", "user friendly", "intuitive", "complicated", "difficult", "setup", "installation"]
+      min_mentions: 5
+      
+    - name: "customer_service"
+      keywords: ["customer service", "support", "warranty", "return", "refund", "replacement", "help"]
+      min_mentions: 5
+
+brand_extraction:
+  # Priority order for extracting brand information
+  use_field: "brand"  # Primary: Look in metadata.details.Brand
+  fallback: "title_first_word"  # Secondary: Extract first word from title
+  
+  # Known brands and their variations for normalization
+  known_brands:
+    - canonical: "Apple"
+      variations: ["APPLE", "apple", "Apple Inc.", "Apple Inc"]
+    - canonical: "Samsung"
+      variations: ["SAMSUNG", "samsung", "Samsung Electronics"]
+    - canonical: "Sony"
+      variations: ["SONY", "sony", "Sony Electronics"]
+    - canonical: "LG"
+      variations: ["LG Electronics"]
+    - canonical: "Bose"
+      variations: ["BOSE", "bose"]
+    - canonical: "JBL"
+      variations: ["jbl"]
+    - canonical: "Anker"
+      variations: ["ANKER", "anker"]
+    - canonical: "Logitech"
+      variations: ["LOGITECH", "logitech"]
+    - canonical: "HP"
+      variations: ["Hewlett-Packard", "HP Inc"]
+    - canonical: "Dell"
+      variations: ["DELL", "dell"]
+    - canonical: "Asus"
+      variations: ["ASUS", "asus", "ASUSTeK"]
+    - canonical: "Lenovo"
+      variations: ["LENOVO", "lenovo"]
+    - canonical: "Microsoft"
+      variations: ["MICROSOFT", "microsoft"]
+    - canonical: "Google"
+      variations: ["GOOGLE", "google"]
+    - canonical: "Amazon"
+      variations: ["AMAZON", "amazon", "Amazon.com"]
+  
+  # Words that should NOT be considered as brands (common first words in titles)
+  blacklist:
+    - "Wireless"
+    - "Bluetooth"
+    - "USB"
+    - "HDMI"
+    - "Type-C"
+    - "Pack"
+    - "Set"
+    - "Bundle"
+    - "New"
+    - "Upgraded"
+    - "Premium"
+    - "Professional"
+    - "Portable"
+    - "Rechargeable"
+    - "Compatible"
+    - "Universal"
+
+processing:
+  # Batch sizes for different operations
+  parse_batch_size: 1000
+  ai_batch_size: 32
+  
+  # GPU settings
+  use_gpu: true
+  mixed_precision: true  # FP16 for faster inference
+  
+  # Caching
+  cache_results: true
+  cache_ttl_days: 30
+  
+  # Progress saving (checkpoint every N products)
+  checkpoint_interval: 100

@@ -1,0 +1,66 @@
+# Template for adding new categories
+# Copy this file and rename to your category (e.g., beauty.yaml, books.yaml)
+
+category:
+  name: "{{CATEGORY_NAME}}"
+  amazon_category_id: "{{AMAZON_CATEGORY_ID}}"
+  description: "{{DESCRIPTION}}"
+  
+data:
+  min_reviews: 20
+  top_products: 3000
+  sampling_strategy: "stratified_top"
+  rating_bins:
+    - [4.5, 5.0, 1000]
+    - [3.0, 4.5, 1000]
+    - [1.0, 3.0, 1000]
+  
+  min_text_length: 20
+  exclude_no_text: true
+
+aspects:
+  # Define at least 4 Tier 1 aspects (core features)
+  tier_1_core:
+    - name: "quality"
+      keywords: ["quality", "good", "bad", "excellent", "poor"]
+      priority: 1
+    
+    - name: "value"
+      keywords: ["price", "value", "worth", "expensive", "cheap"]
+      priority: 2
+    
+    # Add 2 more tier_1 aspects specific to your category
+  
+  # Define 2-4 Tier 2 aspects (common features)
+  tier_2_common:
+    - name: "{{aspect_name}}"
+      keywords: ["keyword1", "keyword2"]
+      min_mentions: 10
+  
+  # Define 1-2 Tier 3 aspects (optional features)
+  tier_3_optional:
+    - name: "customer_service"
+      keywords: ["customer service", "support", "warranty"]
+      min_mentions: 5
+
+brand_extraction:
+  use_field: "brand"
+  fallback: "title_first_word"
+  
+  known_brands:
+    - canonical: "{{BRAND_NAME}}"
+      variations: ["variation1", "variation2"]
+  
+  blacklist:
+    - "New"
+    - "Premium"
+    - "Pack"
+
+processing:
+  parse_batch_size: 1000
+  ai_batch_size: 32
+  use_gpu: true
+  mixed_precision: true
+  cache_results: true
+  cache_ttl_days: 30
+  checkpoint_interval: 100

@@ -1,0 +1,41 @@
+# AI Model Configuration
+
+zero_shot:
+  model_name: "valhalla/distilbart-mnli-12-3"
+  model_type: "zero-shot-classification"
+  
+  # Alternative models (comment/uncomment to switch)
+  # model_name: "facebook/bart-large-mnli"  # Slower but more accurate
+  # model_name: "MoritzLaurer/deberta-v3-base-zeroshot-v1.1-all-33"  # Good alternative
+  
+  device: "cuda"  # "cuda" for GPU, "cpu" for CPU, or specific device like "cuda:0"
+  
+  # Performance settings
+  batch_size: 32
+  max_length: 512
+  use_fp16: true  # Mixed precision for faster inference
+  
+  # Zero-shot specific settings
+  multi_label: false
+  hypothesis_template: "{} about {}"  # Template for generating hypotheses
+
+optimization:
+  # Keyword pre-filtering
+  use_keyword_filter: true
+  keyword_threshold: 0.7  # Keyword match confidence
+  
+  # Caching
+  enable_cache: true
+  cache_backend: "memory"  # "memory", "disk", or "redis"
+  cache_size_mb: 1024  # Max cache size in MB
+  
+  # Batching strategy
+  dynamic_batching: true
+  max_batch_size: 64
+  batch_timeout_ms: 100
+
+huggingface:
+  # Hugging Face settings
+  cache_dir: "./data/cache/models"
+  use_auth_token: false  # Set to true if using private models
+  offline_mode: false

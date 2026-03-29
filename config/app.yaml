@@ -1,0 +1,45 @@
+# Application Configuration
+
+app:
+  name: "Product Review Analyzer"
+  version: "1.0.0"
+  description: "AI-powered product review analysis with aspect-based sentiment detection"
+
+database:
+  path: "./data/processed/reviews.db"
+  type: "sqlite"
+  
+  # SQLite specific settings
+  timeout: 30
+  check_same_thread: false
+  
+  # Connection pool (for future PostgreSQL migration)
+  # pool_size: 5
+  # max_overflow: 10
+
+ui:
+  # Streamlit settings
+  page_title: "Product Review Analyzer"
+  page_icon: "📊"
+  layout: "wide"
+  
+  # Display settings
+  max_reviews_display: 10
+  chart_height: 400
+  chart_theme: "plotly"  # "plotly", "plotly_white", "plotly_dark"
+  
+  # Filtering
+  min_aspect_mentions: 5  # Minimum mentions to display an aspect
+  show_confidence_scores: true
+
+data_sources:
+  amazon:
+    base_url: "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw"
+    review_path: "review_categories"
+    metadata_path: "meta_categories"
+
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/app.log"
+  console: true

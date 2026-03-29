@@ -1,0 +1,147 @@
+# Docker Compose for Product Review Analyzer
+# NOTE: This is for FUTURE use (production deployment)
+# For development, use virtual environment instead
+# See: docs/DOCKER_DECISION.md
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Streamlit UI (no GPU needed)
+  # ============================================
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pra-ui
+    ports:
+      - "8501:8501"
+    environment:
+      - DB_PATH=/app/data/processed/reviews.db
+      - LOG_LEVEL=INFO
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    volumes:
+      # Mount data directories
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./logs:/app/logs
+    depends_on:
+      - database
+    restart: unless-stopped
+    networks:
+      - pra-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Database (optional - SQLite is file-based)
+  # ============================================
+  # If you want to migrate to PostgreSQL:
+  # database:
+  #   image: postgres:15-alpine
+  #   container_name: pra-db
+  #   environment:
+  #     POSTGRES_DB: reviews
+  #     POSTGRES_USER: pra_user
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - pra-network
+  #   restart: unless-stopped
+
+  # For now, using SQLite (no separate database service needed)
+  database:
+    image: busybox
+    container_name: pra-db-placeholder
+    command: /bin/sh -c "echo 'Using SQLite - no separate DB container needed' && sleep infinity"
+    networks:
+      - pra-network
+
+  # ============================================
+  # AI Worker (CPU-only, for background processing)
+  # ============================================
+  # NOTE: For GPU processing, run natively outside Docker
+  # This worker is for CPU-based background tasks only
+  
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: pra-worker
+  #   command: python scripts/run_analysis.py --category electronics --batch-size 8
+  #   environment:
+  #     - USE_GPU=false  # CPU only in container
+  #     - BATCH_SIZE=8
+  #     - LOG_LEVEL=INFO
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./config:/app/config
+  #     - ./logs:/app/logs
+  #   depends_on:
+  #     - database
+  #   networks:
+  #     - pra-network
+  #   restart: on-failure
+
+  # ============================================
+  # Redis (optional - for caching)
+  # ============================================
+  # cache:
+  #   image: redis:7-alpine
+  #   container_name: pra-cache
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - pra-network
+  #   restart: unless-stopped
+
+networks:
+  pra-network:
+    driver: bridge
+
+volumes:
+  # postgres_data:  # Uncomment if using PostgreSQL
+  # redis_data:     # Uncomment if using Redis
+  pass:  # Placeholder
+
+# ============================================
+# Usage:
+# ============================================
+# Start all services:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f ui
+#
+# Stop all services:
+#   docker-compose down
+#
+# Rebuild and restart:
+#   docker-compose up -d --build
+#
+# Access UI:
+#   http://localhost:8501
+#
+# ============================================
+# Production Deployment:
+# ============================================
+# 1. Copy .env.example to .env and configure
+# 2. Update environment variables in this file
+# 3. Run: docker-compose up -d
+# 4. Check logs: docker-compose logs -f
+# 5. Access UI at http://your-server:8501
+#
+# For GPU processing:
+#   - Run AI analysis natively on host machine
+#   - Or use separate GPU-enabled VM/container
+#   - See docs/DOCKER_DECISION.md for details
+# ============================================
