@@ -2,11 +2,13 @@
 
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from ..core.aspect_manager import AspectManager
-from .models.zero_shot import ZeroShotClassifier
 from .negation_handler import NegationHandler  # 🔧 SPRINT 2: Add negation handling
+
+if TYPE_CHECKING:
+    from .models.zero_shot import ZeroShotClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ class SentimentAnalyzer:
         self,
         category_name: str,
         aspect_manager: AspectManager,
-        classifier: Optional[ZeroShotClassifier] = None,
+        classifier: Optional["ZeroShotClassifier"] = None,
         use_keyword_filter: bool = True,
         confidence_threshold: float = 0.65,  # 🔧 FIX: Raised from 0.3 to 0.65
         min_confidence_tier1: float = 0.55,   # 🔧 NEW: Lower threshold for tier 1 (core aspects)
@@ -51,6 +53,7 @@ class SentimentAnalyzer:
         
         # Initialize classifier if not provided
         if classifier is None:
+            from .models.zero_shot import ZeroShotClassifier
             classifier = ZeroShotClassifier()
         self.classifier = classifier
         

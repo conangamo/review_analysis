@@ -2,32 +2,25 @@
 
 import sys
 from pathlib import Path
-import json
 from typing import List, Dict, Any
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import streamlit as st
-from sqlalchemy import desc
 
-from src.core import get_env, ConfigLoader
+from src.core import get_env
 from src.database.db_manager import DatabaseManager
-from src.database.models import Category, Brand, Product, ProductSummary, Review, AspectSentiment
-from src.ui.components.filters import (
-    render_category_selector,
-    render_brand_selector,
-    render_product_selector
-)
-from src.ui.components.charts import (
-    create_aspect_bar_chart,
-    create_overall_sentiment_pie,
-    create_rating_distribution_chart,
-    create_aspect_comparison_chart
-)
-from src.ui.components.review_cards import (
-    render_review_list,
-    render_sentiment_breakdown_card
+from src.ui.components.filters import render_category_selector, render_brand_selector, render_product_selector
+from src.ui.components.charts import create_aspect_bar_chart, create_aspect_comparison_chart
+from src.ui.components.review_cards import render_review_list, render_sentiment_breakdown_card
+from src.ui.services import (
+    get_analysis_progress,
+    get_brands,
+    get_categories,
+    get_product_summary,
+    get_products,
+    get_reviews_with_aspects,
 )
 from src.ui.utils.formatters import format_number, format_rating, format_aspect_name
 
@@ -52,143 +45,30 @@ def init_database():
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_categories(_db_manager):
     """Load categories from database."""
-    with _db_manager.get_session() as session:
-        categories = session.query(Category).all()
-        return [
-            {
-                'id': c.id,
-                'name': c.name,
-                'total_products': c.total_products,
-                'total_reviews': c.total_reviews,
-                'total_brands': c.total_brands
-            }
-            for c in categories
-        ]
+    return get_categories(_db_manager)
 
 
 @st.cache_data(ttl=300)
 def load_brands(_db_manager, category_id: int):
     """Load brands for a category."""
-    with _db_manager.get_session() as session:
-        brands = session.query(Brand).filter_by(
-            category_id=category_id
-        ).filter(
-            Brand.product_count > 0
-        ).order_by(
-            desc(Brand.product_count)
-        ).all()
-        
-        return [
-            {
-                'id': b.id,
-                'name': b.name,
-                'product_count': b.product_count,
-                'avg_rating': b.avg_rating,
-                'total_reviews': b.total_reviews
-            }
-            for b in brands
-        ]
+    return get_brands(_db_manager, category_id)
 
 
 @st.cache_data(ttl=300)
 def load_products(_db_manager, category_id: int, brand_id: int = None):
-    """Load products for a category/brand."""
-    with _db_manager.get_session() as session:
-        query = session.query(Product).filter_by(
-            category_id=category_id,
-            is_selected=True
-        )
-        
-        if brand_id:
-            query = query.filter_by(brand_id=brand_id)
-        
-        products = query.order_by(desc(Product.rating_number)).all()
-        
-        return [
-            {
-                'parent_asin': p.parent_asin,
-                'title': p.title,
-                'average_rating': p.average_rating,
-                'rating_number': p.rating_number,
-                'price': p.price,
-                'image_url': p.image_url
-            }
-            for p in products
-        ]
+    """Load products for a category/brand that have aspect analysis data."""
+    return get_products(_db_manager, category_id, brand_id)
 
 
 @st.cache_data(ttl=300)
 def load_product_summary(_db_manager, parent_asin: str):
     """Load product summary."""
-    with _db_manager.get_session() as session:
-        summary = session.query(ProductSummary).filter_by(
-            parent_asin=parent_asin
-        ).first()
-        
-        if not summary:
-            return None
-        
-        # Parse JSON fields
-        aspects_summary = json.loads(summary.aspects_summary) if summary.aspects_summary else {}
-        rating_dist = json.loads(summary.rating_distribution) if summary.rating_distribution else {}
-        
-        return {
-            'total_reviews': summary.total_reviews,
-            'avg_rating': summary.avg_rating,
-            'rating_distribution': rating_dist,
-            'overall_positive': summary.overall_positive,
-            'overall_negative': summary.overall_negative,
-            'overall_neutral': summary.overall_neutral,
-            'aspects_summary': aspects_summary,
-            'top_positive_ids': json.loads(summary.top_positive_review_ids) if summary.top_positive_review_ids else [],
-            'top_negative_ids': json.loads(summary.top_negative_review_ids) if summary.top_negative_review_ids else [],
-            'top_mixed_ids': json.loads(summary.top_mixed_review_ids) if summary.top_mixed_review_ids else []
-        }
+    return get_product_summary(_db_manager, parent_asin)
 
 
 def load_reviews_with_aspects(_db_manager, review_ids: List[int]):
     """Load reviews and their aspects."""
-    if not review_ids:
-        return [], {}
-    
-    with _db_manager.get_session() as session:
-        reviews = session.query(Review).filter(
-            Review.id.in_(review_ids)
-        ).all()
-        
-        review_list = [
-            {
-                'id': r.id,
-                'rating': r.rating,
-                'title': r.title,
-                'text': r.text,
-                'timestamp': r.timestamp,
-                'verified_purchase': r.verified_purchase,
-                'helpful_vote': r.helpful_vote
-            }
-            for r in reviews
-        ]
-        
-        # Load aspects for these reviews
-        aspects = session.query(AspectSentiment).filter(
-            AspectSentiment.review_id.in_(review_ids)
-        ).all()
-        
-        # Group by review_id
-        aspects_map = {}
-        for aspect in aspects:
-            review_id = aspect.review_id
-            if review_id not in aspects_map:
-                aspects_map[review_id] = []
-            
-            aspects_map[review_id].append({
-                'aspect_name': aspect.aspect_name,
-                'sentiment': aspect.sentiment,
-                'confidence_score': aspect.confidence_score,
-                'tier': aspect.aspect_tier
-            })
-        
-        return review_list, aspects_map
+    return get_reviews_with_aspects(_db_manager, review_ids)
 
 
 def main():
@@ -224,12 +104,20 @@ def main():
         st.info("👈 Select a category from the sidebar to begin")
         return
     
-    # Step 2: Select brand
+    # Step 2: Select brand  
     brands = load_brands(db_manager, selected_category['id'])
     
     if not brands:
         st.warning(f"⚠️  No brands found for {selected_category['name']}")
         return
+    
+    # Show analysis status
+    analyzed_products, total_products = get_analysis_progress(db_manager, selected_category['id'])
+    if analyzed_products > 0:
+        st.sidebar.success(f"✅ {analyzed_products:,} / {total_products:,} products analyzed")
+    else:
+        st.sidebar.warning(f"⚠️ 0 / {total_products:,} products analyzed")
+        st.sidebar.info("Run analysis pipeline first")
     
     selected_brand = render_brand_selector(brands, enable_search=True)
     
@@ -245,7 +133,15 @@ def main():
     )
     
     if not products:
-        st.warning(f"⚠️  No products found for {selected_brand['name']}")
+        st.warning(f"⚠️  No analyzed products found for {selected_brand['name']}")
+        st.info(
+            f"**Products found but not yet analyzed.**\n\n"
+            f"To analyze products, run:\n\n"
+            f"```bash\n"
+            f"python scripts/run_analysis.py --category electronics --limit 1000\n"
+            f"python scripts/generate_summaries.py --category electronics\n"
+            f"```"
+        )
         return
     
     selected_product = render_product_selector(products, enable_search=True)

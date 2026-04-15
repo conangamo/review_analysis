@@ -59,8 +59,8 @@ product-review-analyzer/
 cd product-review-analyzer
 
 # Create virtual environment (recommended)
-python -m venv venv
-venv\Scripts\activate  # Windows
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1  # Windows PowerShell
 # source venv/bin/activate  # Linux/Mac
 
 # Install dependencies
@@ -90,25 +90,25 @@ Download Amazon Reviews 2023 dataset for Electronics:
 python scripts/download_data.py --category electronics
 ```
 
-### 3. Setup Database
+### 4. Setup Database
 
 ```bash
 python scripts/setup_database.py
 ```
 
-### 4. Parse and Load Data
+### 5. Parse and Load Data
 
 ```bash
 python scripts/parse_data.py --category electronics
 ```
 
-### 5. Run AI Analysis
+### 6. Run AI Analysis
 
 ```bash
 python scripts/run_analysis.py --category electronics
 ```
 
-### 6. Launch UI
+### 7. Launch UI
 
 ```bash
 streamlit run src/ui/app.py
@@ -217,20 +217,33 @@ aspects:
 ## 🧪 Testing
 
 ```bash
-# Test configuration
-python src/core/config_loader.py
+# Run all tests (unit + mini integration)
+pytest tests -q
+```
 
-# Test brand extraction
-python src/core/brand_extractor.py
+### Week 2 Mini Integration Scope
 
-# Test aspect detection
-python src/core/aspect_manager.py
+- `tests/test_aspect_manager.py`
+- `tests/test_brand_extractor.py`
+- `tests/test_sentiment_analyzer.py`
+- `tests/integration/test_pipeline_mini.py` (parse -> load -> analyze with tiny synthetic data)
 
-# Test AI model
-python src/ai_engine/models/zero_shot.py
+## 🎬 Demo Script (Week 2)
 
-# Test sentiment analysis
-python src/ai_engine/sentiment_analyzer.py
+Quick demo flow for presentation:
+
+```powershell
+.\scripts\demo_week2.ps1
+```
+
+Options:
+
+```powershell
+# smaller sample
+.\scripts\demo_week2.ps1 -Category electronics -LimitReviews 100
+
+# skip analysis stage
+.\scripts\demo_week2.ps1 -SkipAnalysis
 ```
 
 ## 📝 Example Usage

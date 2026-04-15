@@ -5,6 +5,7 @@ import argparse
 import logging
 from pathlib import Path
 from datetime import datetime
+import re
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,6 +21,58 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _resolve_analysis_settings(config_loader, category_config, env):
+    """Resolve analyzer and processor settings from config/env."""
+    model_config = config_loader.load_model_config()
+    analyzer_config = model_config.get('sentiment_analyzer', {})
+    optimization_config = model_config.get('optimization', {})
+
+    category_processing = category_config.get('processing', {})
+    cache_dir = env.get_path("CACHE_DIR", "./data/cache")
+    checkpoint_dir = env.get_path(
+        "CHECKPOINT_DIR",
+        str(cache_dir / "checkpoints")
+    )
+
+    return {
+        'use_keyword_filter': env.get_bool(
+            "USE_KEYWORD_FILTER",
+            optimization_config.get('use_keyword_filter', True)
+        ),
+        'confidence_threshold': env.get_float(
+            "CONFIDENCE_THRESHOLD",
+            analyzer_config.get('confidence_threshold', 0.65)
+        ),
+        'min_confidence_tier1': env.get_float(
+            "MIN_CONFIDENCE_TIER1",
+            analyzer_config.get('min_confidence_tier1', 0.55)
+        ),
+        'min_confidence_tier2': env.get_float(
+            "MIN_CONFIDENCE_TIER2",
+            analyzer_config.get('min_confidence_tier2', 0.70)
+        ),
+        'analysis_batch_size': env.get_int(
+            "ANALYSIS_BATCH_SIZE",
+            category_processing.get('ai_batch_size', 32)
+        ),
+        'checkpoint_dir': checkpoint_dir,
+    }
+
+
+def _find_resume_batch(checkpoint_dir: Path, checkpoint_name: str):
+    """Find latest checkpoint batch number for a checkpoint name."""
+    pattern = f"{checkpoint_name}_batch_*.pkl"
+    checkpoints = list(checkpoint_dir.glob(pattern))
+    if not checkpoints:
+        return None
+
+    latest = max(checkpoints, key=lambda p: p.stat().st_mtime)
+    match = re.search(r"_batch_(\d+)\.pkl$", latest.name)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def create_processing_status(session, category_id: int, stage: str, total_items: int):
@@ -80,6 +133,16 @@ def main():
         help='Resume from last checkpoint'
     )
     parser.add_argument(
+        '--resume-batch',
+        type=int,
+        help='Resume from a specific batch number (overrides auto-detect)'
+    )
+    parser.add_argument(
+        '--checkpoint-name',
+        type=str,
+        help='Checkpoint name prefix (default: <category>_analysis)'
+    )
+    parser.add_argument(
         '--force',
         action='store_true',
         help='Force re-analysis (skip existing results)'
@@ -111,11 +174,14 @@ def main():
         use_gpu = env.get_bool("USE_GPU", True)
         use_fp16 = env.get_bool("USE_FP16", True)
         model_name = env.get_str("MODEL_NAME", "valhalla/distilbart-mnli-12-3")
+        analysis_settings = _resolve_analysis_settings(config_loader, category_config, env)
         
         print(f"✅ Batch size: {batch_size}")
+        print(f"✅ Analysis batch size: {analysis_settings['analysis_batch_size']}")
         print(f"✅ Use GPU: {use_gpu}")
         print(f"✅ Use FP16: {use_fp16}")
         print(f"✅ Model: {model_name}")
+        print(f"✅ Confidence threshold: {analysis_settings['confidence_threshold']}")
         print()
         
         # Step 2: Initialize database
@@ -221,8 +287,10 @@ def main():
             category_name=args.category,
             aspect_manager=aspect_manager,
             classifier=classifier,
-            use_keyword_filter=True,
-            confidence_threshold=0.3
+            use_keyword_filter=analysis_settings['use_keyword_filter'],
+            confidence_threshold=analysis_settings['confidence_threshold'],
+            min_confidence_tier1=analysis_settings['min_confidence_tier1'],
+            min_confidence_tier2=analysis_settings['min_confidence_tier2']
         )
         print(f"✅ Sentiment analyzer initialized")
         
@@ -230,10 +298,12 @@ def main():
         checkpoint_interval = env.get_int("CHECKPOINT_INTERVAL", 10)
         processor = BatchProcessor(
             analyzer=analyzer,
-            batch_size=100,  # Process 100 reviews per batch
+            batch_size=analysis_settings['analysis_batch_size'],
+            checkpoint_dir=str(analysis_settings['checkpoint_dir']),
             checkpoint_interval=checkpoint_interval
         )
         print(f"✅ Batch processor initialized")
+        print(f"✅ Checkpoint directory: {analysis_settings['checkpoint_dir']}")
         print()
         
         # Step 5: Create processing status
@@ -255,7 +325,7 @@ def main():
         print("🔍 Step 6: Running AI analysis...")
         print("-" * 70)
         print(f"Analyzing {len(reviews):,} reviews...")
-        print(f"Batch size: {batch_size}")
+        print(f"Batch size: {analysis_settings['analysis_batch_size']}")
         print(f"Checkpoint interval: every {checkpoint_interval} batches")
         print()
         
@@ -301,10 +371,24 @@ def main():
                     stats['total_processed']
                 )
         
+        checkpoint_name = args.checkpoint_name or f"{args.category.lower()}_analysis"
+        resume_batch = None
+        if args.resume:
+            if args.resume_batch is not None:
+                resume_batch = args.resume_batch
+            else:
+                resume_batch = _find_resume_batch(
+                    analysis_settings['checkpoint_dir'],
+                    checkpoint_name
+                )
+            print(f"🔄 Resume mode: checkpoint='{checkpoint_name}', batch={resume_batch}")
+
         # Run processing
         results = processor.process_reviews(
             review_data,
-            callback=save_batch_callback
+            callback=save_batch_callback,
+            resume_from=resume_batch,
+            checkpoint_name=checkpoint_name
         )
         
         print()
