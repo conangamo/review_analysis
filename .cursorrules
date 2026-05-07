@@ -1,0 +1,96 @@
+# Project Context
+
+- **Mục tiêu dự án**: Xây dựng hệ thống phân tích review sản phẩm e-commerce theo hướng *aspect-based sentiment analysis* (phát hiện khía cạnh như battery/screen/price và sentiment tương ứng), phục vụ dashboard phân tích trên Streamlit.
+- **Tech Stack cốt lõi**
+  - **Ngôn ngữ**: Python `>=3.9` (theo `setup.py`, Docker base image `python:3.9-slim`).
+  - **Data/ETL**: `pandas`, `numpy`, pipeline script trong `scripts/`.
+  - **AI/NLP**: `transformers`, `torch`, `sentencepiece`, `accelerate`; mô hình mặc định `valhalla/distilbart-mnli-12-3` (zero-shot).
+  - **Database**: SQLite + SQLAlchemy ORM (`sqlalchemy>=2.0.0`), schema SQL tại `src/database/schema.sql`.
+  - **UI/Visualization**: Streamlit + Plotly.
+  - **Config/Env**: YAML (`pyyaml`), `.env` (`python-dotenv`).
+  - **Testing/Dev**: `pytest`, `black`, `flake8`, Jupyter.
+- **Kiến trúc tổng thể**
+  - Dự án theo kiến trúc module hóa dưới `src/`: `core` (config/env/business utility), `data_processing` (parse/load/sample), `ai_engine` (model/analyzer/batch), `database` (models/session/schema), `ui` (app/components/services).
+  - Dòng chảy dữ liệu: `download` -> `parse/load` -> `analyze` -> `summarize` -> `streamlit ui`.
+  - Triết lý runtime: local-first với virtualenv; Docker/Compose được giữ cho triển khai tương lai.
+
+# Directory Structure
+
+- **`config/`**
+  - Chứa toàn bộ YAML cấu hình runtime.
+  - `config/categories/*.yaml`: cấu hình theo domain/category (aspects, sampling, brand extraction).
+  - Không hardcode tham số model/threshold/path trong code nếu đã có trong config/env.
+- **`src/core/`**
+  - Chứa lớp nền tảng dùng chung: load config, env, manager logic xuyên module.
+  - Mọi helper tái sử dụng đa module phải đặt ở đây, không nhúng trực tiếp trong script.
+- **`src/data_processing/`**
+  - Chứa logic parse dữ liệu thô, lọc/sampling, chuẩn hóa dữ liệu trước khi ghi DB.
+  - Không đặt logic AI inference hoặc UI rendering tại đây.
+- **`src/ai_engine/`**
+  - Chứa toàn bộ logic NLP/AI: classifier wrappers, sentiment analyzer, negation/entity handling, batch processing.
+  - Mọi thay đổi model/inference path phải tương thích config trong `config/models.yaml`.
+- **`src/database/`**
+  - Chứa SQLAlchemy models, session/engine manager, schema SQL.
+  - Chỉ module này được phép quản lý kết nối DB và transaction boundary.
+- **`src/ui/`**
+  - `app.py` là entrypoint Streamlit.
+  - `components/` cho UI widgets/charts/cards; `services/` cho truy vấn và business data adapter; `utils/` cho formatter.
+- **`scripts/`**
+  - Chỉ dùng cho orchestration/CLI pipeline (`argparse`) và tác vụ vận hành.
+  - Script không chứa business logic phức tạp; chỉ gọi module trong `src/`.
+- **`tests/`**
+  - Unit test theo module và integration test theo pipeline.
+  - Test mới phải thêm vào đúng scope (`tests/integration/` cho e2e mini pipeline).
+- **`data/`, `logs/`, `notebooks/`**
+  - `data/` và `logs/` là runtime artifacts, không commit dữ liệu lớn/sinh tự động.
+  - `notebooks/` dùng exploration, không thay thế code production trong `src/`.
+
+# Coding Standards
+
+- **Python Style**
+  - Bắt buộc dùng type hints cho hàm public và method quan trọng.
+  - Mỗi module/class/function cần docstring ngắn, rõ mục đích + args/returns khi cần.
+  - Tuân thủ format kiểu Black (4 spaces, line wrapping nhất quán); import nhóm chuẩn: stdlib -> third-party -> local.
+  - Naming: `snake_case` cho biến/hàm, `PascalCase` cho class, `UPPER_SNAKE_CASE` cho hằng số.
+- **Configuration-first**
+  - Ưu tiên đọc tham số từ `config/*.yaml` hoặc `.env` qua loader (`ConfigLoader`, `EnvLoader`), tránh magic numbers hardcoded.
+  - Giá trị mặc định phải khai báo rõ và an toàn; key config mới phải có fallback.
+- **Error Handling**
+  - Với CLI scripts: dùng `try/except` ở tầng `main()` để trả exit code `0/1`; log exception bằng `logger.exception` cho lỗi nghiêm trọng.
+  - Không nuốt lỗi im lặng; nếu `except` cần bỏ qua thì phải có lý do rõ ràng.
+  - Khi thao tác DB session: luôn rollback trong error path và đảm bảo session đóng đúng context manager.
+- **Logging & Output**
+  - Dùng `logging` cho operational traces; `print` chỉ dùng cho CLI progress/user-facing step output.
+  - Message lỗi phải actionable (gợi ý lệnh tiếp theo hoặc hướng khắc phục).
+- **Database/SQL**
+  - Ưu tiên SQLAlchemy ORM trong code ứng dụng; raw SQL chỉ dùng khi thực sự cần và phải parameterized.
+  - Schema SQL: keyword SQL viết hoa, tên bảng/cột dạng `snake_case`, có index cho truy vấn phổ biến.
+  - Mọi thay đổi schema phải cập nhật đồng bộ `models.py`, `schema.sql`, và test liên quan.
+- **AI/ML Conventions**
+  - Mọi thay đổi threshold/model phải phản ánh vào `config/models.yaml` và được nêu trong commit message.
+  - Kết quả phân tích sentiment phải lưu kèm confidence, tier, detection_method nhất quán với schema hiện tại.
+- **Testing Standards**
+  - Code mới/chỉnh sửa logic phải có test tương ứng (unit trước, integration khi có pipeline impact).
+  - Dùng fake/mocking nhẹ cho thành phần AI nặng để test nhanh và ổn định.
+  - Không merge thay đổi làm hỏng `pytest tests -q`.
+- **Performance & Maintainability**
+  - Với dữ liệu lớn: ưu tiên batch processing, caching, và tránh load không cần thiết.
+  - Không lặp logic giữa `scripts/` và `src/`; trích xuất vào module dùng chung khi có dấu hiệu trùng lặp.
+
+# AI Behavior Guidelines
+
+- Luôn phân tích ngữ cảnh codebase hiện tại trước khi sửa; không suy diễn kiến trúc ngoài những gì repo đang dùng.
+- Không tự bịa thư viện, API, file, config key, hoặc command không tồn tại trong dependencies/cấu trúc dự án.
+- Khi thay đổi code:
+  - Giữ thay đổi nhỏ, tập trung đúng phạm vi yêu cầu.
+  - Ưu tiên sửa tại module phù hợp kiến trúc hơn là workaround trong script/UI.
+  - Không refactor diện rộng nếu user không yêu cầu.
+- Trước khi thêm dependency mới, xác minh thật sự cần thiết; ưu tiên tận dụng stack hiện có.
+- Với bugfix hoặc thay đổi logic quan trọng, AI phải:
+  1) xác định nguyên nhân,
+  2) đề xuất/sửa tối thiểu nhưng đúng lớp kiến trúc,
+  3) bổ sung hoặc cập nhật test phù hợp.
+- Luôn giữ tương thích với Python 3.9+ và môi trường Windows PowerShell của dự án.
+- Không commit/chạy lệnh hủy dữ liệu hoặc thay đổi phá hủy (xóa DB, reset hard, drop dữ liệu) nếu chưa được yêu cầu rõ ràng.
+- Câu trả lời cho user nên ngắn gọn, thực dụng, ưu tiên các bước kiểm chứng được; tránh giải thích lan man.
+- Khi thông tin chưa chắc chắn, nêu rõ giả định và kiểm tra lại bằng đọc file/lệnh thay vì đoán.

@@ -28,6 +28,16 @@ class NegationHandler:
         'completely', 'utterly', 'really', 'quite', 'fairly',
         'pretty', 'somewhat', 'rather'
     }
+
+    # Explicit phrase-level polarity reversals (safer than global flip).
+    NEGATE_POSITIVE_PATTERNS = [
+        r"\bnot\s+good\b", r"\bnot\s+great\b", r"\bnot\s+worth\b",
+        r"\bnot\s+recommended?\b", r"\bnever\s+again\b", r"\bno\s+longer\s+works?\b",
+    ]
+    NEGATE_NEGATIVE_PATTERNS = [
+        r"\bnot\s+bad\b", r"\bnot\s+terrible\b", r"\bnot\s+awful\b",
+        r"\bno\s+issues?\b", r"\bno\s+problems?\b",
+    ]
     
     def __init__(self):
         """Initialize negation handler."""
@@ -243,25 +253,24 @@ class NegationHandler:
                 'original_sentiment': base_sentiment
             }
         
-        # Negation detected - check if it applies to the sentiment
-        # Simple heuristic: if negation + positive words → likely negative
-        # if negation + negative words → likely positive
-        
+        # IMPORTANT:
+        # Do NOT globally flip polarity whenever negation exists.
+        # Only adjust when clear phrase-level cues are present.
         adjusted_sentiment = base_sentiment
         adjustment_made = False
-        
-        # Only reverse if confidence is not very high
-        # (high confidence might mean negation doesn't apply)
-        if confidence < 0.80:
-            if base_sentiment == 'positive':
+        text_lower = text.lower()
+
+        if base_sentiment == 'positive':
+            if any(re.search(p, text_lower) for p in self.NEGATE_POSITIVE_PATTERNS):
                 adjusted_sentiment = 'negative'
                 adjustment_made = True
-            elif base_sentiment == 'negative':
+        elif base_sentiment == 'negative':
+            if any(re.search(p, text_lower) for p in self.NEGATE_NEGATIVE_PATTERNS):
                 adjusted_sentiment = 'positive'
                 adjustment_made = True
-            
-            # Reduce confidence due to uncertainty
-            confidence = confidence * 0.8
+
+        if adjustment_made:
+            confidence = confidence * 0.85
         
         return {
             'sentiment': adjusted_sentiment,

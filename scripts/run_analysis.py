@@ -53,6 +53,10 @@ def _resolve_analysis_settings(config_loader, category_config, env):
             "MIN_CONFIDENCE_TIER2",
             analyzer_config.get('min_confidence_tier2', 0.70)
         ),
+        'min_confidence_neutral': env.get_float(
+            "MIN_CONFIDENCE_NEUTRAL",
+            analyzer_config.get('min_confidence_neutral', 0.40)
+        ),
         'analysis_batch_size': env.get_int(
             "ANALYSIS_BATCH_SIZE",
             category_processing.get('ai_batch_size', 32)
@@ -182,6 +186,7 @@ def main():
         print(f"✅ Use FP16: {use_fp16}")
         print(f"✅ Model: {model_name}")
         print(f"✅ Confidence threshold: {analysis_settings['confidence_threshold']}")
+        print(f"✅ Neutral min confidence: {analysis_settings['min_confidence_neutral']}")
         print()
         
         # Step 2: Initialize database
@@ -290,7 +295,8 @@ def main():
             use_keyword_filter=analysis_settings['use_keyword_filter'],
             confidence_threshold=analysis_settings['confidence_threshold'],
             min_confidence_tier1=analysis_settings['min_confidence_tier1'],
-            min_confidence_tier2=analysis_settings['min_confidence_tier2']
+            min_confidence_tier2=analysis_settings['min_confidence_tier2'],
+            min_confidence_neutral=analysis_settings['min_confidence_neutral'],
         )
         print(f"✅ Sentiment analyzer initialized")
         

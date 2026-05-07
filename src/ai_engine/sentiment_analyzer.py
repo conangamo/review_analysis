@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import re
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from ..core.aspect_manager import AspectManager
@@ -15,6 +16,48 @@ logger = logging.getLogger(__name__)
 
 class SentimentAnalyzer:
     """Analyze sentiment for product reviews with aspect detection."""
+    # Neutral-ish lexical cues frequently seen in product reviews.
+    NEUTRAL_CUES = {
+        "okay", "ok", "fine", "decent", "average", "acceptable",
+        "so-so", "not bad", "not great", "nothing special",
+        "works", "works fine", "fair", "alright",
+    }
+    POSITIVE_CUES = {
+        "great", "excellent", "amazing", "love", "perfect",
+        "awesome", "good", "best", "fantastic", "recommend",
+    }
+    NEGATIVE_CUES = {
+        "bad", "poor", "terrible", "awful", "broken", "worst",
+        "slow", "disappointed", "defective", "useless", "hate",
+    }
+    STRONG_POSITIVE_CUES = {
+        "great", "excellent", "awesome", "amazing", "love",
+        "fantastic", "perfect", "exceeded", "highly recommend",
+    }
+    VALUE_POSITIVE_PHRASES = {
+        "great price", "good price", "good value", "great value",
+        "worth the cost", "worth it", "well worth", "best value",
+    }
+    VALUE_NEGATIVE_PHRASES = {
+        "not worth", "waste your money", "overpriced", "too expensive",
+        "not worth the money", "ridiculously expensive",
+    }
+    ASPECT_BLOCKERS = {
+        # Mentioning volume keys/buttons is a control feature, not sound quality.
+        "sound": [r"\bvolume\s+(key|keys|button|buttons|control|controls)\b"],
+        # "dual screen" in workspace narratives is usually not product screen quality.
+        "screen": [
+            r"\bdual\s+screen\b", r"\bleft\s+screen\b", r"\bright\s+screen\b",
+            r"\bon\s+the\s+screen\b", r"\bseparate\s+monitor\b",
+            r"\bcaps?\s+lock\b.*\bscreen\b",
+        ],
+        # charging-port fit issues are often design/fit issues, not battery health.
+        "battery": [r"\bcharging\s+port\b", r"\bport\s+.*\bcharg(e|ing)\b"],
+        "customer_service": [
+            r"\bcustomer\s+service\b.*\b(not|no)\b",
+            r"\breturn(ed|ing)?\b.*\b(other|another|competitor|microsoft)\b",
+        ],
+    }
     
     def __init__(
         self,
@@ -25,6 +68,7 @@ class SentimentAnalyzer:
         confidence_threshold: float = 0.65,  # 🔧 FIX: Raised from 0.3 to 0.65
         min_confidence_tier1: float = 0.55,   # 🔧 NEW: Lower threshold for tier 1 (core aspects)
         min_confidence_tier2: float = 0.70,   # 🔧 NEW: Higher threshold for tier 2/3
+        min_confidence_neutral: float = 0.50,  # Neutral below 0.5 is usually low-signal
         strict_keyword_mode: bool = True,     # 🔧 NEW: Pass to aspect_manager
         use_negation_handling: bool = True    # 🔧 SPRINT 2: Enable negation handling
     ):
@@ -39,6 +83,7 @@ class SentimentAnalyzer:
             confidence_threshold: Default minimum confidence (0.65 recommended)
             min_confidence_tier1: Minimum confidence for tier 1 aspects (0.55 recommended)
             min_confidence_tier2: Minimum confidence for tier 2/3 aspects (0.70 recommended)
+            min_confidence_neutral: Minimum confidence for neutral sentiment (0.50 recommended)
             strict_keyword_mode: Require keyword matching for all aspects
             use_negation_handling: Enable negation and contrast detection (Sprint 2)
         """
@@ -48,6 +93,7 @@ class SentimentAnalyzer:
         self.confidence_threshold = confidence_threshold
         self.min_confidence_tier1 = min_confidence_tier1
         self.min_confidence_tier2 = min_confidence_tier2
+        self.min_confidence_neutral = min_confidence_neutral
         self.strict_keyword_mode = strict_keyword_mode
         self.use_negation_handling = use_negation_handling
         
@@ -100,6 +146,9 @@ class SentimentAnalyzer:
             aspect_name = aspect['name']
             aspect_tier = aspect['tier']
             aspect_keywords = aspect.get('keywords', [])
+
+            if not self._has_aspect_evidence(review_text, aspect_name, aspect_keywords):
+                continue
             
             # 🔧 SPRINT 2: Process with negation handling
             text_to_analyze = review_text
@@ -135,10 +184,27 @@ class SentimentAnalyzer:
                     sentiment_result['confidence'] = negation_result['confidence']
                     sentiment_result['negation_adjusted'] = True
                     sentiment_result['original_sentiment'] = negation_result['original_sentiment']
+
+            # Neutral heuristic layer:
+            # Zero-shot often over-predicts polarity on mild/mixed language.
+            sentiment_result = self._apply_neutral_heuristic(
+                text_to_analyze,
+                aspect_name,
+                sentiment_result,
+            )
+            sentiment_result = self._apply_hard_polarity_overrides(
+                text_to_analyze,
+                aspect_name,
+                sentiment_result,
+            )
             
-            # 🔧 FIX: Use tiered confidence thresholds
-            # Tier 1 (core) aspects have lower threshold, tier 2/3 need higher confidence
-            if aspect_tier == 1:
+            # Use sentiment-aware confidence thresholds:
+            # - Neutral usually has lower confidence in NLI zero-shot models.
+            # - Keep stricter thresholds for positive/negative to avoid noisy polarity labels.
+            if sentiment_result['sentiment'] == 'neutral':
+                # Tier-3 neutral (e.g. customer_service neutral) is prone to noise.
+                min_conf = self.min_confidence_neutral + (0.08 if aspect_tier >= 3 else 0.0)
+            elif aspect_tier == 1:
                 min_conf = self.min_confidence_tier1
             else:
                 min_conf = self.min_confidence_tier2
@@ -166,6 +232,112 @@ class SentimentAnalyzer:
         self.cache[cache_key] = results
         
         return results
+
+    def _has_aspect_evidence(self, text: str, aspect_name: str, aspect_keywords: List[str]) -> bool:
+        """Require concrete textual evidence before emitting an aspect."""
+        text_lower = text.lower()
+
+        blockers = self.ASPECT_BLOCKERS.get(aspect_name, [])
+        if any(re.search(pattern, text_lower) for pattern in blockers):
+            return False
+
+        # Explicit word/phrase hit only (no loose semantic guessing here).
+        for keyword in aspect_keywords:
+            kw = keyword.strip().lower()
+            if not kw:
+                continue
+            pattern = r"\b" + re.escape(kw) + r"\b"
+            if re.search(pattern, text_lower):
+                return True
+
+        return False
+
+    def _apply_hard_polarity_overrides(
+        self,
+        text: str,
+        aspect_name: str,
+        sentiment_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply deterministic overrides for unmistakable polarity phrases."""
+        text_lower = text.lower()
+
+        if aspect_name == "value":
+            if any(token in text_lower for token in self.VALUE_NEGATIVE_PHRASES):
+                sentiment_result["original_sentiment"] = sentiment_result.get("sentiment")
+                sentiment_result["sentiment"] = "negative"
+                sentiment_result["confidence"] = max(float(sentiment_result.get("confidence", 0.0)), 0.74)
+                sentiment_result["hard_override"] = "value_negative_phrase"
+            elif any(token in text_lower for token in self.VALUE_POSITIVE_PHRASES):
+                sentiment_result["original_sentiment"] = sentiment_result.get("sentiment")
+                sentiment_result["sentiment"] = "positive"
+                sentiment_result["confidence"] = max(float(sentiment_result.get("confidence", 0.0)), 0.74)
+                sentiment_result["hard_override"] = "value_positive_phrase"
+
+        return sentiment_result
+
+    def _apply_neutral_heuristic(
+        self,
+        text: str,
+        aspect_name: str,
+        sentiment_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Convert weak/mixed polarity into neutral for practical review language.
+        """
+        text_lower = text.lower()
+        pos_hits = sum(1 for token in self.POSITIVE_CUES if token in text_lower)
+        neg_hits = sum(1 for token in self.NEGATIVE_CUES if token in text_lower)
+        has_neutral_cue = any(token in text_lower for token in self.NEUTRAL_CUES)
+        has_negated_positive_phrase = any(
+            f"not {token}" in text_lower for token in self.STRONG_POSITIVE_CUES
+        )
+        has_strong_positive = False
+        for token in self.STRONG_POSITIVE_CUES:
+            if token in text_lower:
+                # Avoid counting negated praise (e.g. "not great") as strong-positive.
+                if f"not {token}" in text_lower or f"never {token}" in text_lower:
+                    continue
+                has_strong_positive = True
+                break
+        has_value_positive_phrase = any(
+            token in text_lower for token in self.VALUE_POSITIVE_PHRASES
+        )
+        has_mixed_signal = pos_hits > 0 and neg_hits > 0
+        base_confidence = float(sentiment_result.get('confidence', 0.0))
+        polarity_balance = abs(pos_hits - neg_hits)
+
+        # Guardrail: do not neutralize clearly positive value language.
+        if (
+            aspect_name == "value"
+            and has_value_positive_phrase
+            and sentiment_result.get("sentiment") != "negative"
+        ):
+            sentiment_result['sentiment'] = 'positive'
+            sentiment_result['confidence'] = max(base_confidence, 0.70)
+            sentiment_result['value_phrase_override'] = True
+            return sentiment_result
+
+        # Guardrail: avoid over-neutralization on clearly strong positive text.
+        if has_strong_positive and not has_mixed_signal and neg_hits == 0:
+            return sentiment_result
+
+        should_convert = False
+        if has_mixed_signal and base_confidence < 0.75:
+            should_convert = True
+        elif has_neutral_cue and polarity_balance == 0 and base_confidence < 0.68:
+            should_convert = True
+        elif has_negated_positive_phrase and base_confidence < 0.75:
+            should_convert = True
+
+        if should_convert:
+            if sentiment_result['sentiment'] != 'neutral':
+                sentiment_result['original_sentiment'] = sentiment_result['sentiment']
+            sentiment_result['sentiment'] = 'neutral'
+            # Keep confidence bounded and realistic for heuristic overrides.
+            sentiment_result['confidence'] = min(base_confidence, 0.62)
+            sentiment_result['neutral_heuristic'] = True
+
+        return sentiment_result
     
     def _get_aspects_to_analyze(self, text: str) -> List[Dict[str, Any]]:
         """

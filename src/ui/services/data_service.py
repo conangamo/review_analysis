@@ -3,7 +3,7 @@
 import json
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 from src.database.models import (
     AspectSentiment,
@@ -42,49 +42,100 @@ def get_brands(db_manager, category_id: int) -> List[Dict[str, Any]]:
             .all()
         )
 
-        return [
-            {
-                "id": b.id,
-                "name": b.name,
-                "product_count": b.product_count,
-                "avg_rating": b.avg_rating,
-                "total_reviews": b.total_reviews,
-            }
-            for b in brands
-        ]
+        brand_ids = [b.id for b in brands]
+        analyzed_map = {}
+        if brand_ids:
+            analyzed_rows = (
+                session.query(
+                    Product.brand_id,
+                    func.count(func.distinct(Product.parent_asin)),
+                )
+                .join(ProductSummary, Product.parent_asin == ProductSummary.parent_asin)
+                .filter(Product.brand_id.in_(brand_ids))
+                .filter(
+                    ProductSummary.overall_positive
+                    + ProductSummary.overall_negative
+                    + ProductSummary.overall_neutral
+                    > 0
+                )
+                .group_by(Product.brand_id)
+                .all()
+            )
+            analyzed_map = {brand_id: count for brand_id, count in analyzed_rows}
+
+        brand_rows = []
+        for b in brands:
+            analyzed_products = analyzed_map.get(b.id, 0)
+            brand_rows.append(
+                {
+                    "id": b.id,
+                    "name": b.name,
+                    "product_count": b.product_count,
+                    "avg_rating": b.avg_rating,
+                    "total_reviews": b.total_reviews,
+                    "analyzed_products": analyzed_products,
+                    "has_analysis": analyzed_products > 0,
+                }
+            )
+
+        # Prioritize brands that already have analyzed products.
+        brand_rows.sort(
+            key=lambda item: (item["has_analysis"], item.get("analyzed_products", 0), item.get("product_count", 0)),
+            reverse=True,
+        )
+        return brand_rows
 
 
 def get_products(db_manager, category_id: int, brand_id: int = None) -> List[Dict[str, Any]]:
-    """Load products that have summary and sentiment data."""
+    """Load selected products and mark whether analysis is available."""
     with db_manager.get_session() as session:
-        query = (
-            session.query(Product)
-            .filter_by(category_id=category_id, is_selected=True)
-            .join(ProductSummary, Product.parent_asin == ProductSummary.parent_asin)
-            .filter(
-                ProductSummary.overall_positive
-                + ProductSummary.overall_negative
-                + ProductSummary.overall_neutral
-                > 0
-            )
-        )
+        query = session.query(Product).filter_by(category_id=category_id, is_selected=True)
 
         if brand_id:
             query = query.filter(Product.brand_id == brand_id)
 
         products = query.order_by(desc(Product.rating_number)).all()
+        if not products:
+            return []
 
-        return [
-            {
+        asins = [p.parent_asin for p in products]
+        summaries = (
+            session.query(ProductSummary)
+            .filter(ProductSummary.parent_asin.in_(asins))
+            .all()
+        )
+        summary_map = {s.parent_asin: s for s in summaries}
+
+        product_rows = []
+        for p in products:
+            summary = summary_map.get(p.parent_asin)
+            has_analysis = False
+            if summary:
+                has_analysis = (
+                    (summary.overall_positive or 0)
+                    + (summary.overall_negative or 0)
+                    + (summary.overall_neutral or 0)
+                    > 0
+                )
+
+            product_rows.append(
+                {
                 "parent_asin": p.parent_asin,
                 "title": p.title,
                 "average_rating": p.average_rating,
                 "rating_number": p.rating_number,
                 "price": p.price,
                 "image_url": p.image_url,
+                "has_analysis": has_analysis,
             }
-            for p in products
-        ]
+            )
+
+        # Keep analyzed products first, then by review volume.
+        product_rows.sort(
+            key=lambda item: (item["has_analysis"], item.get("rating_number") or 0),
+            reverse=True,
+        )
+        return product_rows
 
 
 def get_product_summary(db_manager, parent_asin: str) -> Dict[str, Any]:

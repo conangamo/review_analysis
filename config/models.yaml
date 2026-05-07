@@ -39,6 +39,7 @@ sentiment_analyzer:
   confidence_threshold: 0.65
   min_confidence_tier1: 0.55
   min_confidence_tier2: 0.70
+  min_confidence_neutral: 0.50
 
 huggingface:
   # Hugging Face settings

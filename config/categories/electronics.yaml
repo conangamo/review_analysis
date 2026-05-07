@@ -21,7 +21,7 @@ aspects:
   # Tier 1: Core aspects - ALWAYS analyzed and displayed
   tier_1_core:
     - name: "battery"
-      keywords: ["battery", "battery life", "power", "charging", "charge", "recharge", "rechargeable"]
+      keywords: ["battery", "battery life", "charging", "charger", "recharge", "rechargeable"]
       priority: 1
       
     - name: "performance"
@@ -39,12 +39,12 @@ aspects:
   # Tier 2: Common aspects - Analyzed if keywords detected, displayed if sufficient mentions (>10)
   tier_2_common:
     - name: "screen"
-      keywords: ["screen", "display", "monitor", "resolution", "brightness", "vivid", "dim", "clear"]
+      keywords: ["screen", "display", "monitor", "resolution", "brightness", "vivid", "dim"]
       applicable_to: ["phones", "laptops", "tablets", "monitors", "tv"]
       min_mentions: 10
       
     - name: "sound"
-      keywords: ["sound", "audio", "speaker", "volume", "music", "bass", "treble", "noise", "quality"]
+      keywords: ["sound", "audio", "speaker", "volume", "bass", "treble", "noise"]
       applicable_to: ["headphones", "speakers", "phones", "earbuds"]
       min_mentions: 10
       
@@ -63,7 +63,7 @@ aspects:
       min_mentions: 5
       
     - name: "customer_service"
-      keywords: ["customer service", "support", "warranty", "return", "refund", "replacement", "help"]
+      keywords: ["customer service", "customer support", "tech support", "support team", "warranty", "refund", "replacement"]
       min_mentions: 5
 
 brand_extraction:

@@ -4,6 +4,7 @@ import torch
 from transformers import pipeline
 from typing import List, Dict, Any, Optional
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -165,20 +166,86 @@ class ZeroShotClassifier:
             hypothesis_template="{}"
         )
         
-        # Extract sentiment from label
-        top_label = result['labels'][0]
-        sentiment = top_label.split()[0]  # Extract 'positive', 'negative', or 'neutral'
-        confidence = result['scores'][0]
+        # Build stable score map (do not rely only on top-1 label order)
+        score_map = {
+            'positive': 0.0,
+            'negative': 0.0,
+            'neutral': 0.0,
+        }
+        for label, score in zip(result['labels'], result['scores']):
+            if label.startswith("positive"):
+                score_map['positive'] = score
+            elif label.startswith("negative"):
+                score_map['negative'] = score
+            elif label.startswith("neutral"):
+                score_map['neutral'] = score
+
+        sentiment = self._resolve_sentiment(score_map)
+
+        confidence = score_map[sentiment]
         
         return {
             'sentiment': sentiment,
             'confidence': confidence,
-            'all_scores': {
-                'positive': result['scores'][result['labels'].index(f"positive about {aspect}")],
-                'negative': result['scores'][result['labels'].index(f"negative about {aspect}")],
-                'neutral': result['scores'][result['labels'].index(f"neutral about {aspect}")]
-            }
+            'all_scores': score_map
         }
+
+    @staticmethod
+    def _resolve_sentiment(scores: Dict[str, float]) -> str:
+        """
+        Resolve final sentiment with uncertainty-aware calibration.
+
+        Why this logic:
+        - Zero-shot NLI often over-predicts polar classes (positive/negative).
+        - Real review snippets frequently contain weak or mixed signals.
+        - We mark such uncertain cases as neutral instead of forcing polarity.
+        """
+        pos = float(scores.get("positive", 0.0))
+        neg = float(scores.get("negative", 0.0))
+        neu = float(scores.get("neutral", 0.0))
+
+        ordered = sorted(
+            [("positive", pos), ("negative", neg), ("neutral", neu)],
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        top_label, top_score = ordered[0]
+        second_label, second_score = ordered[1]
+        margin = top_score - second_score
+
+        # Normalize for entropy-based uncertainty check.
+        total = max(pos + neg + neu, 1e-8)
+        p_pos, p_neg, p_neu = pos / total, neg / total, neu / total
+        entropy = -sum(
+            p * math.log(p + 1e-12)
+            for p in (p_pos, p_neg, p_neu)
+        )
+        max_entropy = math.log(3.0)
+        entropy_ratio = entropy / max_entropy if max_entropy > 0 else 0.0
+
+        # Strong direct neutral signal.
+        if top_label == "neutral" and top_score >= 0.42:
+            return "neutral"
+
+        # Weak confidence across all classes -> neutral.
+        if top_score < 0.55:
+            return "neutral"
+
+        # Ambiguous ranking (close scores) -> neutral.
+        if margin < 0.14 and top_score < 0.68:
+            return "neutral"
+
+        # High distribution uncertainty -> neutral.
+        if entropy_ratio > 0.93 and top_score < 0.60:
+            return "neutral"
+
+        # Polar classes need enough separation from each other.
+        if top_label in {"positive", "negative"}:
+            polarity_gap = abs(pos - neg)
+            if polarity_gap < 0.15 and neu >= 0.18:
+                return "neutral"
+
+        return top_label
     
     def batch_classify(
         self,

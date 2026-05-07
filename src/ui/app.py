@@ -49,14 +49,16 @@ def load_categories(_db_manager):
 
 
 @st.cache_data(ttl=300)
-def load_brands(_db_manager, category_id: int):
+def load_brands(_db_manager, category_id: int, cache_version: int = 1):
     """Load brands for a category."""
+    _ = cache_version  # Cache-busting version for schema/logic changes
     return get_brands(_db_manager, category_id)
 
 
 @st.cache_data(ttl=300)
-def load_products(_db_manager, category_id: int, brand_id: int = None):
+def load_products(_db_manager, category_id: int, brand_id: int = None, cache_version: int = 1):
     """Load products for a category/brand that have aspect analysis data."""
+    _ = cache_version  # Cache-busting version for schema/logic changes
     return get_products(_db_manager, category_id, brand_id)
 
 
@@ -103,13 +105,28 @@ def main():
     if not selected_category:
         st.info("👈 Select a category from the sidebar to begin")
         return
+    selected_category_name = selected_category.get("name", "electronics").lower()
     
     # Step 2: Select brand  
-    brands = load_brands(db_manager, selected_category['id'])
+    brands = load_brands(db_manager, selected_category['id'], cache_version=2)
     
     if not brands:
         st.warning(f"⚠️  No brands found for {selected_category['name']}")
         return
+
+    analyzed_brands = sum(1 for b in brands if b.get("has_analysis"))
+    only_analyzed_brands = st.sidebar.checkbox(
+        "✅ Only brands with analyzed products",
+        value=True,
+        help="Hide brands that do not have any analyzed product yet.",
+    )
+    st.sidebar.caption(f"Analyzed brands: {analyzed_brands:,}/{len(brands):,}")
+    if only_analyzed_brands:
+        brands = [b for b in brands if b.get("has_analysis")]
+        if not brands:
+            st.warning("⚠️ No brands currently have analyzed products.")
+            st.info("Uncheck `Only brands with analyzed products` to browse all brands.")
+            return
     
     # Show analysis status
     analyzed_products, total_products = get_analysis_progress(db_manager, selected_category['id'])
@@ -129,19 +146,37 @@ def main():
     products = load_products(
         db_manager,
         selected_category['id'],
-        selected_brand['id']
+        selected_brand['id'],
+        cache_version=2,
     )
+
+    # Demo-friendly default: focus on analyzed products first.
+    analyzed_count = sum(1 for p in products if p.get("has_analysis"))
+    total_count = len(products)
+    only_analyzed = st.sidebar.checkbox(
+        "✅ Only analyzed products",
+        value=True,
+        help="Show only products that already have sentiment summary data.",
+    )
+    st.sidebar.caption(f"Analyzed products: {analyzed_count:,}/{total_count:,}")
+
+    if only_analyzed:
+        products = [p for p in products if p.get("has_analysis")]
     
     if not products:
-        st.warning(f"⚠️  No analyzed products found for {selected_brand['name']}")
-        st.info(
-            f"**Products found but not yet analyzed.**\n\n"
-            f"To analyze products, run:\n\n"
-            f"```bash\n"
-            f"python scripts/run_analysis.py --category electronics --limit 1000\n"
-            f"python scripts/generate_summaries.py --category electronics\n"
-            f"```"
-        )
+        if only_analyzed:
+            st.warning(f"⚠️  No analyzed products found for {selected_brand['name']}")
+            st.info(
+                f"**Products exist but none are analyzed yet for this brand.**\n\n"
+                f"Either uncheck `Only analyzed products` to browse all products,\n"
+                f"or run analysis for this category:\n\n"
+                f"```bash\n"
+                f"python scripts/run_analysis.py --category {selected_category_name} --limit 1000\n"
+                f"python scripts/generate_summaries.py --category {selected_category_name}\n"
+                f"```"
+            )
+        else:
+            st.warning(f"⚠️  No products found for {selected_brand['name']}")
         return
     
     selected_product = render_product_selector(products, enable_search=True)
@@ -169,7 +204,11 @@ def display_product_analysis(db_manager, product: Dict[str, Any]):
     
     if not summary:
         st.warning("⚠️  No analysis data available for this product")
-        st.info(f"Run: `python scripts/run_analysis.py --category electronics`")
+        st.info(
+            "Run analysis + summary generation for this category, for example:\n"
+            "`python scripts/run_analysis.py --category <category>` then "
+            "`python scripts/generate_summaries.py --category <category>`"
+        )
         return
     
     # Product header

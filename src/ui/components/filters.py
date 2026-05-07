@@ -70,7 +70,12 @@ def render_brand_selector(
     options = {}
     for brand in brands:
         avg_rating = brand.get('avg_rating') or 0
-        label = f"{brand['name']} ({brand['product_count']} products, ⭐{avg_rating:.1f})"
+        analyzed_products = brand.get("analyzed_products", 0)
+        analysis_icon = "✅" if brand.get("has_analysis") else "⏳"
+        label = (
+            f"{analysis_icon} {brand['name']} "
+            f"({brand['product_count']} products, AI:{analyzed_products}, ⭐{avg_rating:.1f})"
+        )
         options[label] = brand
     
     selected_key = st.sidebar.selectbox(
@@ -128,7 +133,8 @@ def render_product_selector(
         avg_rating = product.get('average_rating') or 0
         rating_number = product.get('rating_number') or 0
         
-        label = f"{title} (⭐{avg_rating:.1f}, {rating_number:,} reviews)"
+        analysis_icon = "✅" if product.get("has_analysis") else "⏳"
+        label = f"{analysis_icon} {title} (⭐{avg_rating:.1f}, {rating_number:,} reviews)"
         options[label] = product
     
     selected_key = st.sidebar.selectbox(

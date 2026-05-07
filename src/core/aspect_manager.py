@@ -1,5 +1,6 @@
 """Aspect management utilities."""
 
+import re
 from typing import List, Dict, Any, Optional
 
 try:
@@ -92,7 +93,14 @@ class AspectManager:
         # Check each aspect's keywords
         for aspect in self.aspects:
             for keyword in aspect.get('keywords', []):
-                if keyword.lower() in text_lower:
+                keyword_lower = keyword.lower().strip()
+                if not keyword_lower:
+                    continue
+
+                # Use word-boundary matching to avoid substring hallucinations.
+                # Example: keyword "sound" should not match inside unrelated tokens.
+                pattern = r"\b" + re.escape(keyword_lower) + r"\b"
+                if re.search(pattern, text_lower):
                     detected.add(aspect['name'])
                     break
         
