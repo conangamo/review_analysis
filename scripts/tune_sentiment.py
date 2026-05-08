@@ -17,6 +17,14 @@ from src.database.db_manager import DatabaseManager
 from src.database.models import Category, Product, Review
 
 
+def _safe_text(value: str) -> str:
+    """Return terminal-safe text for current stdout encoding."""
+    if value is None:
+        return ""
+    encoding = sys.stdout.encoding or "utf-8"
+    return value.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
 def _resolve_analysis_settings(config_loader, category_config, env):
     """Resolve analyzer settings from config/env (same logic as run_analysis)."""
     model_config = config_loader.load_model_config()
@@ -71,6 +79,17 @@ def main():
         help="Number of sample outputs to print",
     )
     parser.add_argument(
+        "--detailed",
+        action="store_true",
+        help="Print detailed blocks like inspect_recent_analysis.",
+    )
+    parser.add_argument(
+        "--text-max",
+        type=int,
+        default=220,
+        help="Max text chars in detailed preview (default: 220).",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         choices=["auto", "cpu", "cuda"],
@@ -115,7 +134,13 @@ def main():
 
         # Random sample directly from DB for fast iteration
         sampled_reviews = (
-            session.query(Review.id, Review.text)
+            session.query(
+                Review.id,
+                Review.parent_asin,
+                Review.rating,
+                Review.title,
+                Review.text,
+            )
             .filter(Review.parent_asin.in_(selected_asins))
             .filter(func.length(Review.text) > 20)
             .order_by(func.random())
@@ -164,13 +189,22 @@ def main():
     aspect_count_per_review = []
     analyzed_examples = []
 
-    for review_id, text in sampled_reviews:
+    for review_id, parent_asin, rating, title, text in sampled_reviews:
         aspects = analyzer.analyze_review(text, review_id=review_id)
         aspect_count_per_review.append(len(aspects))
         for item in aspects:
             sentiment_counts[item["sentiment"]] += 1
         if aspects and len(analyzed_examples) < args.show_examples:
-            analyzed_examples.append((review_id, text, aspects))
+            analyzed_examples.append(
+                {
+                    "review_id": review_id,
+                    "parent_asin": parent_asin,
+                    "rating": rating,
+                    "title": title,
+                    "text": text,
+                    "aspects": aspects,
+                }
+            )
 
     total_aspects = sum(sentiment_counts.values())
     neutral_pct = (
@@ -197,11 +231,34 @@ def main():
     print(f"\nNeutral ratio (target sanity check): {neutral_pct:.2f}%")
 
     print("\nExamples:")
-    for idx, (review_id, text, aspects) in enumerate(analyzed_examples, start=1):
-        preview = " ".join(text.strip().split())[:140]
-        labels = ", ".join(f"{a['aspect']}:{a['sentiment']}" for a in aspects[:5])
-        print(f"{idx}. review_id={review_id} | {preview}")
-        print(f"   -> {labels}")
+    for idx, sample in enumerate(analyzed_examples, start=1):
+        review_id = sample["review_id"]
+        parent_asin = sample["parent_asin"]
+        rating = sample["rating"]
+        title = (sample["title"] or "").strip()
+        text = " ".join((sample["text"] or "").strip().split())
+        aspects = sample["aspects"]
+
+        if args.detailed:
+            print("-" * 70)
+            print(
+                f"review_id={review_id}  parent_asin={parent_asin}  "
+                f"rating={rating if rating is not None else 'N/A'}"
+            )
+            if title:
+                print(f"title: {_safe_text(title[:120])}")
+            preview = text[: args.text_max] + ("..." if len(text) > args.text_max else "")
+            print(f"text: {_safe_text(preview)}")
+            for a in aspects:
+                print(
+                    f"  - {a['aspect']:20s}  {a['sentiment']:8s}  "
+                    f"conf={a['confidence']:.3f}  tier={a['tier']}"
+                )
+        else:
+            preview = text[:140]
+            labels = ", ".join(f"{a['aspect']}:{a['sentiment']}" for a in aspects[:5])
+            print(f"{idx}. review_id={review_id} | {_safe_text(preview)}")
+            print(f"   -> {_safe_text(labels)}")
 
     print("\nTip: tune config/code, rerun this script, then run full pipeline once.")
     return 0
