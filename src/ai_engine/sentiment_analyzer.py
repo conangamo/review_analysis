@@ -70,7 +70,8 @@ class SentimentAnalyzer:
         min_confidence_tier2: float = 0.70,   # 🔧 NEW: Higher threshold for tier 2/3
         min_confidence_neutral: float = 0.50,  # Neutral below 0.5 is usually low-signal
         strict_keyword_mode: bool = True,     # 🔧 NEW: Pass to aspect_manager
-        use_negation_handling: bool = True    # 🔧 SPRINT 2: Enable negation handling
+        use_negation_handling: bool = True,    # 🔧 SPRINT 2: Enable negation handling
+        require_keyword_evidence: bool = True,  # If False, still run ML/negation/heuristics without keyword-in-text gate
     ):
         """
         Initialize sentiment analyzer.
@@ -86,6 +87,9 @@ class SentimentAnalyzer:
             min_confidence_neutral: Minimum confidence for neutral sentiment (0.50 recommended)
             strict_keyword_mode: Require keyword matching for all aspects
             use_negation_handling: Enable negation and contrast detection (Sprint 2)
+            require_keyword_evidence: When True (default), skip an aspect unless a YAML keyword
+                appears in the review (same as production). When False, run the rest of the
+                pipeline for every candidate aspect (e.g. Streamlit playground on arbitrary text).
         """
         self.category_name = category_name
         self.aspect_manager = aspect_manager
@@ -96,6 +100,7 @@ class SentimentAnalyzer:
         self.min_confidence_neutral = min_confidence_neutral
         self.strict_keyword_mode = strict_keyword_mode
         self.use_negation_handling = use_negation_handling
+        self.require_keyword_evidence = require_keyword_evidence
         
         # Initialize classifier if not provided
         if classifier is None:
@@ -127,7 +132,7 @@ class SentimentAnalyzer:
         if not review_text or len(review_text.strip()) < 10:
             return []
         
-        # Check cache
+        # Check cache (include mode flags so toggling playground options does not reuse wrong cache)
         cache_key = self._get_cache_key(review_text)
         if cache_key in self.cache:
             return self.cache[cache_key]
@@ -147,7 +152,12 @@ class SentimentAnalyzer:
             aspect_tier = aspect['tier']
             aspect_keywords = aspect.get('keywords', [])
 
-            if not self._has_aspect_evidence(review_text, aspect_name, aspect_keywords):
+            if self._is_blocked_aspect_context(review_text, aspect_name):
+                continue
+
+            if self.require_keyword_evidence and not self._has_aspect_evidence(
+                review_text, aspect_name, aspect_keywords
+            ):
                 continue
             
             # 🔧 SPRINT 2: Process with negation handling
@@ -232,6 +242,12 @@ class SentimentAnalyzer:
         self.cache[cache_key] = results
         
         return results
+
+    def _is_blocked_aspect_context(self, text: str, aspect_name: str) -> bool:
+        """True if ASPECT_BLOCKERS say this mention context should not score this aspect."""
+        text_lower = text.lower()
+        blockers = self.ASPECT_BLOCKERS.get(aspect_name, [])
+        return bool(blockers) and any(re.search(pattern, text_lower) for pattern in blockers)
 
     def _has_aspect_evidence(self, text: str, aspect_name: str, aspect_keywords: List[str]) -> bool:
         """Require concrete textual evidence before emitting an aspect."""
@@ -361,8 +377,9 @@ class SentimentAnalyzer:
             return self.aspect_manager.aspects
     
     def _get_cache_key(self, text: str) -> str:
-        """Generate cache key for review text."""
-        return hashlib.md5(text.encode()).hexdigest()
+        """Generate cache key for review text (includes analysis mode flags)."""
+        mode = f"kf{int(self.use_keyword_filter)}_ev{int(self.require_keyword_evidence)}"
+        return hashlib.md5((mode + "|" + text).encode()).hexdigest()
     
     def clear_cache(self):
         """Clear analysis cache."""

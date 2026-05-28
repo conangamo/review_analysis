@@ -10,6 +10,8 @@ import re
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from sqlalchemy import func
+
 from src.core import ConfigLoader, AspectManager, get_env
 from src.database.db_manager import DatabaseManager
 from src.database.models import Review, AspectSentiment, ProcessingStatus
@@ -249,11 +251,11 @@ def main():
                 
                 query = query.filter(Review.id.notin_(analyzed_ids))
             
-            # Apply limit if specified
+            # Apply limit if specified (random order spreads work across products;
+            # otherwise SQLite row order can stick to the same few ASINs every run).
             if args.limit:
-                query = query.limit(args.limit)
-            
-            # Load as list of dicts
+                query = query.order_by(func.random()).limit(args.limit)
+
             reviews = query.all()
             
             if not reviews:

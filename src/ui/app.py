@@ -14,13 +14,15 @@ from src.database.db_manager import DatabaseManager
 from src.ui.components.filters import render_category_selector, render_brand_selector, render_product_selector
 from src.ui.components.charts import create_aspect_bar_chart, create_aspect_comparison_chart
 from src.ui.components.review_cards import render_review_list, render_sentiment_breakdown_card
-from src.ui.services import (
+from src.ui.services.data_service import (
     get_analysis_progress,
     get_brands,
     get_categories,
     get_product_summary,
+    get_product_reviews_page,
     get_products,
     get_reviews_with_aspects,
+    total_pages_for_count,
 )
 from src.ui.utils.formatters import format_number, format_rating, format_aspect_name
 
@@ -335,8 +337,87 @@ def display_product_analysis(db_manager, product: Dict[str, Any]):
         else:
             st.info("No mixed reviews available")
 
+    st.markdown("---")
+    st.markdown("## 💬 All reviews")
+    st.caption("Every review stored for this product (newest first). Aspects appear when analysis has run for that review.")
 
-# Sidebar footer
+    page_state_key = f"all_reviews_page_{parent_asin}"
+    size_state_key = f"all_reviews_page_size_{parent_asin}"
+
+    col_sz, _ = st.columns([1, 3])
+    with col_sz:
+        page_size = st.selectbox(
+            "Per page",
+            options=[10, 25, 50, 100],
+            index=1,
+            key=size_state_key,
+        )
+
+    if size_state_key + "_prev" not in st.session_state:
+        st.session_state[size_state_key + "_prev"] = page_size
+    if st.session_state[size_state_key + "_prev"] != page_size:
+        st.session_state[size_state_key + "_prev"] = page_size
+        st.session_state[page_state_key] = 1
+
+    st.session_state.setdefault(page_state_key, 1)
+
+    page_guess = max(1, int(st.session_state[page_state_key]))
+    offset = (page_guess - 1) * page_size
+    total, reviews, aspects_map = get_product_reviews_page(
+        db_manager, parent_asin, offset, page_size
+    )
+    total_pages = total_pages_for_count(total, page_size)
+    page = min(page_guess, total_pages)
+    if page != page_guess:
+        st.session_state[page_state_key] = page
+        offset = (page - 1) * page_size
+        total, reviews, aspects_map = get_product_reviews_page(
+            db_manager, parent_asin, offset, page_size
+        )
+
+    st.session_state[page_state_key] = page
+
+    nav1, nav2, nav3, nav4 = st.columns([1, 1, 2, 1])
+    with nav1:
+        if st.button("◀ Prev", disabled=page <= 1, key=f"all_rev_prev_{parent_asin}"):
+            st.session_state[page_state_key] = page - 1
+            st.rerun()
+    with nav2:
+        if st.button("Next ▶", disabled=page >= total_pages, key=f"all_rev_next_{parent_asin}"):
+            st.session_state[page_state_key] = page + 1
+            st.rerun()
+    with nav3:
+        if total > 0:
+            start_i = offset + 1
+            end_i = offset + len(reviews)
+            st.markdown(
+                f"**Page {page:,} / {total_pages:,}** — showing **{start_i:,}–{end_i:,}** of **{total:,}** reviews"
+            )
+        else:
+            st.markdown("No reviews in database for this product.")
+    with nav4:
+        page_options = list(range(1, total_pages + 1))
+        if len(page_options) > 1 and total_pages <= 200:
+            jump = st.selectbox(
+                "Go to",
+                options=page_options,
+                index=page - 1,
+                key=f"all_rev_jump_{parent_asin}_{total_pages}_{page_size}",
+            )
+            if jump != page:
+                st.session_state[page_state_key] = jump
+                st.rerun()
+        elif len(page_options) > 1:
+            st.caption(f"Over {200:,} pages — use Prev/Next")
+
+    if total > 0:
+        render_review_list(
+            reviews,
+            aspects_map,
+            max_reviews=None,
+            list_title=f"### Reviews on this page ({len(reviews):,})",
+            list_caption=None,
+        )
 def render_sidebar_footer():
     """Render sidebar footer with info."""
     st.sidebar.markdown("---")

@@ -1,6 +1,7 @@
 """Data access helpers for Streamlit UI."""
 
 import json
+import math
 from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import desc, func
@@ -205,6 +206,79 @@ def get_reviews_with_aspects(
             )
 
         return review_list, aspects_map
+
+
+def get_product_reviews_page(
+    db_manager,
+    parent_asin: str,
+    offset: int,
+    limit: int,
+) -> Tuple[int, List[Dict[str, Any]], Dict[int, List[Dict[str, Any]]]]:
+    """
+    Paginated reviews for a product (newest first by timestamp, then by id).
+
+    Returns:
+        total_count, review dicts in page order, review_id -> aspects list.
+    """
+    if limit <= 0:
+        return 0, [], {}
+
+    offset = max(0, offset)
+
+    with db_manager.get_session() as session:
+        base = session.query(Review).filter(Review.parent_asin == parent_asin)
+        total = base.count()
+
+        rows = (
+            base.order_by(desc(Review.timestamp), desc(Review.id))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        if not rows:
+            return total, [], {}
+
+        review_ids = [r.id for r in rows]
+        review_list = [
+            {
+                "id": r.id,
+                "rating": r.rating,
+                "title": r.title,
+                "text": r.text,
+                "timestamp": r.timestamp,
+                "verified_purchase": r.verified_purchase,
+                "helpful_vote": r.helpful_vote,
+            }
+            for r in rows
+        ]
+
+        aspects = (
+            session.query(AspectSentiment)
+            .filter(AspectSentiment.review_id.in_(review_ids))
+            .all()
+        )
+        aspects_map: Dict[int, List[Dict[str, Any]]] = {}
+        for aspect in aspects:
+            aspects_map.setdefault(aspect.review_id, []).append(
+                {
+                    "aspect_name": aspect.aspect_name,
+                    "sentiment": aspect.sentiment,
+                    "confidence_score": aspect.confidence_score,
+                    "tier": aspect.aspect_tier,
+                }
+            )
+
+    return total, review_list, aspects_map
+
+
+def total_pages_for_count(total: int, page_size: int) -> int:
+    """Ceiling of total / page_size, at least 1 when showing empty state."""
+    if page_size <= 0:
+        return 1
+    if total <= 0:
+        return 1
+    return max(1, math.ceil(total / page_size))
 
 
 def get_analysis_progress(db_manager, category_id: int) -> Tuple[int, int]:

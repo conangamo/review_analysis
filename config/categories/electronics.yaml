@@ -25,7 +25,22 @@ aspects:
       priority: 1
       
     - name: "performance"
-      keywords: ["performance", "speed", "fast", "slow", "lag", "laggy", "responsive", "quick", "snappy"]
+      keywords:
+        [
+          "performance",
+          "speed",
+          "fast",
+          "slow",
+          "lag",
+          "laggy",
+          "responsive",
+          "quick",
+          "snappy",
+          "hot",
+          "overheat",
+          "overheating",
+          "thermal",
+        ]
       priority: 2
       
     - name: "quality"
@@ -49,7 +64,21 @@ aspects:
       min_mentions: 10
       
     - name: "design"
-      keywords: ["design", "look", "appearance", "style", "aesthetic", "beautiful", "ugly", "sleek"]
+      keywords:
+        [
+          "design",
+          "look",
+          "appearance",
+          "style",
+          "aesthetic",
+          "beautiful",
+          "ugly",
+          "sleek",
+          "fan",
+          "fans",
+          "cooling",
+        ]
+      applicable_to: ["phones", "laptops", "tablets", "monitors", "tv"]
       min_mentions: 10
       
     - name: "durability"
