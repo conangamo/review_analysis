@@ -13,6 +13,8 @@ transformers>=4.35.0
 torch>=2.0.0
 sentencepiece>=0.1.99
 accelerate>=0.24.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
 
 # UI
 streamlit>=1.28.0
